@@ -771,9 +771,13 @@ class TorchForecastingModel(GlobalForecastingModel, ABC):
 
         logger.info(f"Train dataset contains {len(train_dataset)} samples.")
 
-        return self.fit_from_dataset(
+        result =  self.fit_from_dataset(
             train_dataset, val_dataset, trainer, verbose, epochs, num_loader_workers
         )
+
+        # TODO store the prob information.
+
+        return result
 
     @random_method
     def fit_from_dataset(

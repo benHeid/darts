@@ -436,11 +436,20 @@ class ForecastingModel(ABC, metaclass=ModelMeta):
             # train_cov = covariates.drop_after(pred_time) if covariates else None
 
             if retrain:
-                self._fit_wrapper(
-                    series=train,
-                    past_covariates=past_covariates,
-                    future_covariates=future_covariates,
-                )
+                for stack in self.model.stacks:
+                    if stack.should_be_freezed:
+                        stack.requires_grad_(False)
+                    else:
+                        stack.requires_grad_(True)
+                #if any(list(map(lambda p: not p.should_be_freezed, self.model.stacks))):
+                if any(list(map(lambda p: p.requires_grad, self.model.parameters(True)))):
+                #    self.set_online(False)
+                    self._fit_wrapper(
+                        series=train,
+                        past_covariates=past_covariates,
+                        future_covariates=future_covariates,
+                    )
+                  #  self.set_online(True)
 
             forecast = self._predict_wrapper(
                 n=forecast_horizon,

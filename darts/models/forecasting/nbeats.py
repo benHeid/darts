@@ -9,6 +9,7 @@ from typing import List, NewType, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
+from river.drift import ADWIN, PageHinkley
 
 from darts.logging import get_logger, raise_if_not, raise_log
 from darts.models.forecasting.pl_forecasting_module import PLPastCovariatesModule
@@ -286,12 +287,16 @@ class _Stack(nn.Module):
         """
         super().__init__()
 
+        self.should_be_freezed = True
         self.input_chunk_length = input_chunk_length
         self.target_length = target_length
         self.nr_params = nr_params
         self.dropout = dropout
         self.batch_norm = batch_norm
         self.activation = activation
+        self.drift_detector = ADWIN(delta=.2)
+        self.online = False
+        self.means = []
 
         if g_type == _GType.GENERIC:
             self.blocks_list = [
@@ -329,6 +334,10 @@ class _Stack(nn.Module):
 
         self.blocks = nn.ModuleList(self.blocks_list)
 
+    def freeze_if_not_drifted(self):
+        # TODO check if Drift exist if not freeze the layer
+        pass
+
     def forward(self, x):
         # One forecast vector per parameter in the distribution
         stack_forecast = torch.zeros(
@@ -348,6 +357,17 @@ class _Stack(nn.Module):
 
             # subtract backcast from input to produce residual
             x = x - x_hat
+            if self.online:
+                self.means.append(x.square().mean())
+                self.drift_detector.update(x.square().mean())
+                if self.drift_detector.change_detected:
+                    self.should_be_freezed = False
+                    self.drift_detector.reset()
+                    print("Drift Detected")
+                    #for param in self.parameters(True):
+                else :
+                    self.should_be_freezed  = True
+                    #for param in self.parameters(True):
 
         stack_residual = x
 
@@ -489,6 +509,11 @@ class _NBEATSModule(PLPastCovariatesModule):
         # on this params (the last block backcast is not part of the final output of the net).
         self.stacks_list[-1].blocks[-1].backcast_linear_layer.requires_grad_(False)
         self.stacks_list[-1].blocks[-1].backcast_g.requires_grad_(False)
+
+    def fit(self, *args, **kwargs):
+        #for stack in self.stacks_list:
+        #    stack.freeze_if_not_drifting()
+        super(_NBEATSModule, self).fit(*args, **kwargs)
 
     def forward(self, x):
 
@@ -779,3 +804,7 @@ class NBEATSModel(PastCovariatesTorchModel):
             activation=self.activation,
             **self.pl_module_params,
         )
+
+    def set_online(self, online):
+        for stack in self.model.stacks:
+            stack.online = online
